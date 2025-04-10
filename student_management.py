@@ -2,20 +2,63 @@ import streamlit as st
 import pandas as pd
 import uuid
 from datetime import datetime
+import json
+import os
 
-# Initialize session states
-if 'students' not in st.session_state:
-    st.session_state.students = []
-if 'classes' not in st.session_state:
-    st.session_state.classes = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"]
+# -------------------- Authentication --------------------
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    with st.form("login"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+        if submitted:
+            if username == "admin" and password == "admin@123":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+    st.stop()
+
+# -------------------- Data Persistence Functions --------------------
+def load_data():
+    try:
+        with open('data.json', 'r') as f:
+            data = json.load(f)
+            st.session_state.students = data.get('students', [])
+            st.session_state.classes = data.get('classes', ["1st", "2nd", "3rd", "4th", "5th", 
+                                                           "6th", "7th", "8th", "9th", "10th"])
+    except FileNotFoundError:
+        st.session_state.students = []
+        st.session_state.classes = ["1st", "2nd", "3rd", "4th", "5th",
+                                   "6th", "7th", "8th", "9th", "10th"]
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        st.session_state.students = []
+        st.session_state.classes = ["1st", "2nd", "3rd", "4th", "5th",
+                                   "6th", "7th", "8th", "9th", "10th"]
+
+def save_data():
+    data = {
+        'students': st.session_state.students,
+        'classes': st.session_state.classes
+    }
+    with open('data.json', 'w') as f:
+        json.dump(data, f)
+
+# Initialize data
+if 'students' not in st.session_state or 'classes' not in st.session_state:
+    load_data()
+
 if 'filtered_students' not in st.session_state:
     st.session_state.filtered_students = []
 
-# Function to generate unique ID
+# -------------------- Core Application --------------------
 def generate_id():
     return uuid.uuid4().hex
 
-# Function to download CSV
 def download_csv(data):
     df = pd.DataFrame(data)
     csv = df.to_csv(index=False).encode('utf-8')
@@ -27,12 +70,10 @@ def download_csv(data):
         mime='text/csv',
     )
 
-# Main App
 st.title("Student Management System")
 
 # Class Management
 with st.expander("Manage Classes"):
-    # Add Class Form
     with st.form("add_class"):
         cols = st.columns([4,1])
         new_class = cols[0].text_input("Add New Class")
@@ -41,28 +82,27 @@ with st.expander("Manage Classes"):
             new_class = new_class.strip()
             if new_class not in st.session_state.classes:
                 st.session_state.classes.append(new_class)
+                save_data()
                 st.success(f"Class '{new_class}' added successfully!")
             else:
                 st.error("Class already exists!")
     
-    # Class List with Delete Buttons
     st.write("### Existing Classes")
     if not st.session_state.classes:
         st.info("No classes added yet")
     else:
-        for cls in st.session_state.classes[:]:  # Iterate over copy of list
+        for cls in st.session_state.classes[:]:
             cols = st.columns([6,1])
             cols[0].write(f"• {cls}")
             
-            # Delete Class Button
             if cols[1].button("🗑️", key=f"del_cls_{cls}"):
-                # Check if any student belongs to this class
                 class_in_use = any(student["Class"] == cls for student in st.session_state.students)
                 
                 if class_in_use:
                     st.error(f"Cannot delete '{cls}' - students are enrolled in this class!")
                 else:
                     st.session_state.classes.remove(cls)
+                    save_data()
                     st.rerun()
 
 # Add Student Form
@@ -93,6 +133,7 @@ with st.expander("Add New Student"):
                     "Added Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 st.session_state.students.append(student)
+                save_data()
                 st.success("Student added successfully!")
             else:
                 st.error("Please fill all required fields (*)")
@@ -120,21 +161,20 @@ else:
     download_csv(st.session_state.filtered_students)
     
     for student in st.session_state.filtered_students:
-        cols = st.columns([3,3,2,2,3,1,1])  # Added column for Address
+        cols = st.columns([3,3,2,2,3,1,1])
         cols[0].write(student["Name"])
         cols[1].write(student["Father's Name"])
         cols[2].write(student["Class"])
         cols[3].write(student["Phone"])
-        cols[4].write(student["Address"])  # Address displayed directly
+        cols[4].write(student["Address"])
         
-        # Edit Button
         edit_btn = cols[5].button("✏️", key=f"edit_{student['ID']}")
         if edit_btn:
             st.session_state.edit_id = student['ID']
         
-        # Delete Button
         if cols[6].button("🗑️", key=f"delete_{student['ID']}"):
             st.session_state.students = [s for s in st.session_state.students if s['ID'] != student['ID']]
+            save_data()
             st.rerun()
 
 # Edit Student Form
@@ -165,6 +205,7 @@ if 'edit_id' in st.session_state:
                         "Phone": new_phone,
                         "Address": new_address
                     })
+                    save_data()
                     del st.session_state.edit_id
                     st.rerun()
                 
